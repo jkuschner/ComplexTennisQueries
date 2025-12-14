@@ -13,8 +13,6 @@ OPTIMIZED_FACT_PATH = f"file://{BASE_PATH}/data/optimized/fact_point"
 OPTIMIZED_DIM_MATCH_PATH = f"file://{BASE_PATH}/data/optimized/dim_match"
 OPTIMIZED_DIM_PLAYER_PATH = f"file://{BASE_PATH}/data/optimized/dim_player"
 
-# Removed get_surface_type function as surface type is being ignored.
-
 def get_round_group(round_col):
     """
     Categorizes the match round into 'Early Round' or 'Late Round'.
@@ -31,7 +29,7 @@ def run_etl_star_schema():
     to the Fact Table.
     """
     
-    # 1. Initialize Spark Session
+    # Initialize Spark Session
     try:
         spark = SparkSession.builder \
             .appName("TennisStarSchemaETL") \
@@ -41,11 +39,11 @@ def run_etl_star_schema():
         
         print("--- Spark Session Initialized for ETL ---")
         
-        # 2. Extract: Read the cleaned Parquet data from the Raw Zone
+        # Extract: Read the cleaned Parquet data from the Raw Zone
         print(f"Reading cleaned Parquet data from: {RAW_PARQUET_PATH}")
         raw_df = spark.read.parquet(RAW_PARQUET_PATH)
         
-        # --- DIMENSION 1: Match Dimension (DimMatch) ---
+        # DIMENSION 1: Match Dimension (DimMatch)
         print("\n--- Creating DimMatch ---")
         
         # Select unique match context fields
@@ -73,7 +71,7 @@ def run_etl_star_schema():
         dim_match.write.mode("overwrite").parquet(OPTIMIZED_DIM_MATCH_PATH)
 
 
-        # --- DIMENSION 2: Player Dimension (DimPlayer) ---
+        # DIMENSION 2: Player Dimension (DimPlayer)
         print("\n--- Creating DimPlayer ---")
         
         # Gather all unique player names from both player columns
@@ -94,10 +92,10 @@ def run_etl_star_schema():
         dim_player.write.mode("overwrite").parquet(OPTIMIZED_DIM_PLAYER_PATH)
 
 
-        # --- FACT TABLE: Points Fact Table (FactPoint) ---
+        # FACT TABLE: Points Fact Table (FactPoint)
         print("\n--- Creating FactPoint (Partitioned by Year and Round Group) ---")
         
-        # A. Join the Raw Data with DimMatch to get the match_key
+        # Join the Raw Data with DimMatch to get the match_key
         fact_df = raw_df.join(
             # Select required keys and partitioning columns from DimMatch
             dim_match.select("match_key", "date", "tournament", "player1_name", "player2_name", "year", "round_group"),
@@ -105,14 +103,14 @@ def run_etl_star_schema():
             how="inner"
         )
         
-        # B. Select the final fact columns and dimension keys
+        # Select the final fact columns and dimension keys
         fact_point = fact_df.select(
             # Keys
             col("match_key"),
             
             # Partitioning Columns
             col("year"), 
-            col("round_group"), # New partitioning column
+            col("round_group"),
             
             # Point Metrics/Facts
             col("point_id"),
@@ -120,7 +118,7 @@ def run_etl_star_schema():
             col("Set2"),
             col("Gm1"),
             col("Gm2"),
-            col("Pts").alias("game_score"), # Renamed for clarity
+            col("Pts").alias("game_score"),
             col("Gm#").alias("game_number_in_match"),
             col("Svr").alias("server_id"),
             col("1st").alias("rally_1st_serve"),
@@ -128,11 +126,10 @@ def run_etl_star_schema():
             col("PtWinner").alias("point_winner_id")
         )
 
-        # C. Write FactPoint to the Optimized Zone with Partitioning
+        # Write FactPoint to the Optimized Zone with Partitioning
         print(f"Writing FactPoint (Count: {fact_point.count()}) to: {OPTIMIZED_FACT_PATH} and applying PARTITIONING...")
         
         # Partitioning by year AND round_group
-        # Spark will create folders like: /year=2022/round_group=Late Round/...
         fact_point.write \
             .mode("overwrite") \
             .partitionBy("year", "round_group") \

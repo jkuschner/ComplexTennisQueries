@@ -11,7 +11,7 @@ RAW_INPUT_CSV_PATH = f"file://{BASE_PATH}/data/raw/tennis_points/tennis_raw_data
 OPTIMIZED_FACT_PATH = f"file://{BASE_PATH}/data/optimized/fact_point"
 
 # --- Benchmark Parameters ---
-TARGET_YEARS = [2021, 2022, 2023, 2024, 2025] # Based on Project Proposal scope
+TARGET_YEARS = [2021, 2022, 2023, 2024, 2025]
 LATE_ROUND = "Late Round"
 EARLY_ROUND = "Early Round"
 ALL_ROUNDS = [LATE_ROUND, EARLY_ROUND]
@@ -23,7 +23,6 @@ def get_q4_filter_raw(df_col, query_type):
     Q4_DEN: Rally contains '+' in the second position (S&V attempt filter adjusted).
     Q4_NUM: Rally contains '+' in the second position AND (v OR z OR o OR p OR j OR k) (Successful S&V shot hit)
     """
-    # *** REFINEMENT: Filter points where the second character of the rally column is '+' ***
     # PySpark uses 1-based indexing for substr. The second character is at position 2.
     sv_attempt_filter = (df_col.isNotNull()) & (df_col.substr(2, 1) == "+")
     
@@ -39,7 +38,6 @@ def get_q4_filter_optimized(df_col, query_type):
     """Generates the Q4 filter condition for a single rally column (optimized data).
     Q4_DEN: Rally contains '+' in the second position (S&V attempt filter adjusted).
     """
-    # *** REFINEMENT: Filter points where the second character of the rally column is '+' ***
     # PySpark uses 1-based indexing for substr. The second character is at position 2.
     sv_attempt_filter = (df_col.isNotNull()) & (df_col.substr(2, 1) == "+")
     
@@ -55,6 +53,7 @@ def get_q6_filter(rally_col, pt_winner_col, query_type):
     """Generates the Q6 filter condition based on approach presence and PtWinner.
     Q6_DEN: Rally contains '+' (Approach attempt)
     Q6_NUM: Rally contains '+' AND PtWinner = 1 (Successful Approach, server wins point)
+    NOTE: This logic is incorrect for Q6 which is why this query is omitted from the report
     """
     
     # Denominator filter: Approach shot (+) is present in the 1st serve rally
@@ -70,13 +69,13 @@ def run_query_raw(spark, query_type, target_year, target_round=None, rally_patte
     """Executes a benchmark query against the unoptimized RAW CSV data."""
     start_time = time.time()
     
-    # Read the entire raw CSV file (simulating full scan overhead)
+    # Read the entire raw CSV file
     raw_df_full = spark.read.option("header", "true").csv(RAW_INPUT_CSV_PATH)
 
     # Base filter for raw data
     raw_filter = col("match_id").startswith(str(target_year))
     
-    # 2. Second Serve Filter (Q5 specific - checks the '2nd' rally column)
+    # Second Serve Filter (Q5 specific - checks the '2nd' rally column)
     if is_second_serve:
         # Denominator check (total 2nd serves)
         raw_filter = raw_filter & col("2nd").isNotNull()
@@ -122,14 +121,14 @@ def run_query_optimized(spark, query_id, target_year, target_round=None, rally_p
     # Initialize filter with partition filters
     optimized_filter = lit(True)
 
-    # 1. Partition Filter: Year (Critical for Partition Pruning)
+    # Partition Filter: Year
     optimized_filter = optimized_filter & (col("year") == target_year)
         
-    # 2. Partition Filter: Round Group (Critical for Partition Pruning)
+    # Partition Filter: Round Group
     if target_round in ALL_ROUNDS:
         optimized_filter = optimized_filter & (col("round_group") == target_round)
     
-    # 3. Second Serve Filter (Q5 specific)
+    # Second Serve Filter (Q5 specific)
     if is_second_serve:
         # Denominator (Total 2nd serve points)
         optimized_filter = optimized_filter & col("rally_2nd_serve").isNotNull()
@@ -137,7 +136,7 @@ def run_query_optimized(spark, query_id, target_year, target_round=None, rally_p
         if rally_pattern == "@":
             optimized_filter = optimized_filter & col("rally_2nd_serve").contains(rally_pattern)
 
-    # 4. Columnar Filter: Rally Patterns (for all other queries)
+    # Columnar Filter: Rally Patterns (for all other queries)
     else:
         if rally_pattern:
             
@@ -191,9 +190,7 @@ def run_benchmarks():
             print(f"Error: Optimized data not found at {OPTIMIZED_FACT_PATH}. Ensure Phase 2 ETL ran successfully.")
             return
 
-        # ====================================================================
         # QUERY DEFINITIONS
-        # ====================================================================
 
         query_params = [
             ("Q1: Baseline Count", "All Rounds", {"rally_pattern": None}),
@@ -209,9 +206,7 @@ def run_benchmarks():
             ("Q6: Approach Success Rate (Early)", EARLY_ROUND, {"rally_pattern": "COMPLEX_APPROACH"}),
         ]
         
-        # ====================================================================
         # EXECUTION LOOP: Year -> Query -> Round Group
-        # ====================================================================
         
         print("\n--- Starting Benchmark Execution (YoY Analysis) ---")
         
@@ -224,7 +219,7 @@ def run_benchmarks():
                 # Determine target round group for partitioning
                 target_round_group = round_scope if round_scope in ALL_ROUNDS else None
                 
-                # --- SIMPLE QUERIES (Q1, Q2, Q3) ---
+                # SIMPLE QUERIES (Q1, Q2, Q3)
                 if q_id in ["Q1", "Q2", "Q3"]:
                     
                     # Optimized Run
@@ -245,10 +240,10 @@ def run_benchmarks():
                     print(f"{name} ({round_scope}) - OPT: {opt_duration:.4f}s | RAW: {raw_duration:.4f}s | Count: {opt_count}")
 
 
-                # --- COMPLEX METRIC QUERIES (Q4, Q5, Q6) ---
+                # COMPLEX METRIC QUERIES (Q4, Q5, Q6)
                 else: 
                     
-                    # ---------------------- DENOMINATOR RUN (Total Attempts/Points) ----------------------
+                    # DENOMINATOR RUN (Total Attempts/Points) 
                     
                     if q_id == "Q5":
                         denom_opt_count, denom_opt_time = run_query_optimized(spark, f"{q_id}_DEN", target_year, target_round_group, is_second_serve=True)
@@ -258,14 +253,14 @@ def run_benchmarks():
                         denom_opt_count, denom_opt_time = run_query_optimized(spark, f"{q_id}_DEN", target_year, target_round_group, rally_pattern=q_params.get("rally_pattern"))
 
 
-                    # ---------------------- NUMERATOR RUN (Successes/Failures) ----------------------
+                    # NUMERATOR RUN (Successes/Failures)
                     
                     if q_id == "Q4":
                         # Success: S&V (+) AND hitting any volley shot on 1st OR 2nd serve rally
                         num_params = {"rally_pattern": "COMPLEX_VOLLEY"} 
                         num_opt_count, num_opt_time = run_query_optimized(spark, f"{q_id}_NUM", target_year, target_round_group, rally_pattern="COMPLEX_VOLLEY")
                     elif q_id == "Q5":
-                        # Failure: 2nd Serve UE (@)
+                        # Failure: 2nd Serve Unforced Error (@)
                         num_params = {"rally_pattern": "@", "is_second_serve": True}
                         num_opt_count, num_opt_time = run_query_optimized(spark, f"{q_id}_NUM", target_year, target_round_group, **num_params)
                     elif q_id == "Q6: Approach Success Rate (Late)" or q_id == "Q6: Approach Success Rate (Early)":
@@ -273,11 +268,11 @@ def run_benchmarks():
                         num_params = {"rally_pattern": "COMPLEX_APPROACH"}
                         num_opt_count, num_opt_time = run_query_optimized(spark, f"{q_id}_NUM", target_year, target_round_group, rally_pattern="COMPLEX_APPROACH")
 
-                    # --- CALCULATE METRIC & RAW BENCHMARK ---
+                    # CALCULATE METRIC & RAW BENCHMARK
                     
                     opt_metric = calculate_metric(num_opt_count, denom_opt_count)
                     
-                    # We run the RAW benchmark against the Numerator filter (which is the most complex)
+                    # run the RAW benchmark against the Numerator filter
                     raw_count, raw_duration = run_query_raw(spark, f"{q_id}_NUM", target_year, target_round_group, **num_params)
                     
                     key = f"{name} ({target_year})"
@@ -291,9 +286,7 @@ def run_benchmarks():
                     }
                     print(f"{name} ({round_scope}) - OPT: {denom_opt_time:.4f}s | RAW: {raw_duration:.4f}s | Metric: {results[key]['optimized_metric']}")
 
-        # ====================================================================
         # SUMMARY AND DELIVERABLE
-        # ====================================================================
         
         print("\n\n=======================================================================================")
         print("                           FINAL BENCHMARK SUITE RESULTS (YoY)")

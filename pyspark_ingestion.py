@@ -35,7 +35,7 @@ def run_raw_ingestion():
     and saves the raw baseline data to the Raw Zone as Parquet.
     """
     
-    # 1. Initialize Spark Session (Simulating a cluster session)
+    # Initialize Spark Session (Simulating a cluster session)
     try:
         spark = SparkSession.builder \
             .appName("TennisRawIngestion") \
@@ -45,7 +45,7 @@ def run_raw_ingestion():
         
         print("--- Spark Session Initialized ---")
         
-        # 2. Extract (Read Raw CSV using the defined schema)
+        # Extract (Read Raw CSV using the defined schema)
         print(f"Reading raw CSV data from: {RAW_INPUT_PATH}")
         raw_df = spark.read \
             .csv(RAW_INPUT_PATH, header=True, schema=tennis_schema, inferSchema=False)
@@ -53,13 +53,12 @@ def run_raw_ingestion():
         print(f"Raw record count: {raw_df.count()}")
         raw_df.printSchema()
 
-        # 3. Transform (Cleaning, Key Extraction, and Column Dropping)
+        # Transform (Cleaning, Key Extraction, and Column Dropping)
         
-        # A. Split the complex 'match_id' into required dimension columns
+        # Split the complex 'match_id' into required dimension columns
         # NEW STRUCTURE ASSUMPTION: date-gender-tournament-round-player1-player2
         df_split = raw_df.withColumn("match_split", split(col("match_id"), "-"))
 
-        # NOTE: Indentation corrected below to align chained methods
         df_transformed = df_split \
             .withColumnRenamed("Pt", "point_id") \
             .withColumn("date_raw", col("match_split").getItem(0)) \
@@ -70,13 +69,13 @@ def run_raw_ingestion():
             .withColumn("player2_name", col("match_split").getItem(5)) \
             .drop("match_split", "date_raw") # Drop temporary split column and raw date string
             
-        # B. Drop unneeded columns as requested by the user
-        df_transformed = df_transformed.drop("Tbset", "Notes", "match_id") # Dropping original match_id since we extracted its components
+        # Drop unneeded columns
+        df_transformed = df_transformed.drop("Tbset", "Notes", "match_id")
 
-        # C. Minimal Cleaning (Drop rows with missing key fields)
+        # Drop rows with missing key fields
         df_cleaned = df_transformed.na.drop(subset=['tournament', 'date', 'PtWinner'])
         
-        # D. Remove Duplicates
+        # Remove Duplicates
         df_cleaned = df_cleaned.dropDuplicates()
         
         print(f"Cleaned record count after transformation: {df_cleaned.count()}")
@@ -84,7 +83,7 @@ def run_raw_ingestion():
         df_cleaned.printSchema()
 
 
-        # 4. Load (Ingest into Raw Zone as Parquet)
+        # Load (Ingest into Raw Zone as Parquet)
         print(f"Writing cleaned data to Raw Zone Parquet at: {RAW_OUTPUT_PATH}")
         df_cleaned.write \
             .mode("overwrite") \
